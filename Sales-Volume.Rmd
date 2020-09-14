@@ -1,0 +1,598 @@
+---
+title: "Predicting Sales Volume for 4 Different Product Types"
+author: "Jennifer Brosnahan"
+date: "9/9/2020"
+output:
+  html_document: 
+    keep_md: yes
+    theme: lumen
+    highlight: haddock
+---
+
+## Objective
+#### We have been asked by an Electronics Company to forecast sales of new products that they are considering for building up inventory. Specifically, they would like for us to predict sales volume for four different product types: PCs, Laptops, Netbooks, and Smartphones, which will be used to determine which new products will be brought into store inventory.
+
+#### They would also like for us to analyze the impact Customer Reviews and Service Reviews have on sales volume.
+
+## Goal
+#### Our goals are to 1) assess the impact Customer Reviews and Service Reviews have on sales, and 2) build a model that can predict sales volume on new products with at least 85% level of certainty (R2) and minimal error (RMSE). We will build three different algorithms (Random Forest, Support Vector Machines RBF kernel, and Gradient Boosting) and utilize a variety of automatic and manual tuning mechanisms to optimize models.
+
+## Data Description
+#### Data consists of service reviews, customer reviews, historical sales data, and product descriptions for all products currently in inventory. The target variable for this project is sales 'Volume' for the product types: PC, Laptops, Netbooks, and Smartphones.
+
+### Loading packages
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(caret)
+library(ggplot2)
+library(corrplot)
+library(openxlsx)
+library(kableExtra)
+library(dplyr)
+library(scales)
+```
+
+## Import data
+```{r}
+existing <- read.csv(file.path('C:/Users/jlbro/OneDrive/C3T3', 'existing.csv'), 
+                     stringsAsFactors = TRUE)
+```
+
+## Check structure
+```{r}
+str(existing)
+```
+
+#### Notice that an important variable, 'ProductType' has 12 levels. Regression algorithms can easily misinterpret categorical variables in which there are more than 2 values (it may treat them as ranked or ordinal values), so we need to turn each ProductType level into a 'dummy' variable. This will turn each 'ProductType' into it's own variable with only 2 values, '0' for false and '1' for true. 
+
+```{r}
+dummy <- dummyVars(' ~ .', data = existing)
+existing2 <- data.frame(predict(dummy, newdata = existing))
+# check structure
+str(existing2)
+```
+
+#### Notice each product type is it's own variable. The regression algorithms will now be able to better understand each. We only need PC, Laptop, Netbook, and Smartphone, so let's remove all other product types.
+
+### Check summary for descriptive stats and NAs
+```{r}
+summary(existing2)
+```
+
+#### Reveals 15 NAs for 'BestSellersRank'. Deleting as it is the only variable with NAs and was determined to have low correlation to target variable (0.12)
+```{r}
+existing2$BestSellersRank <- NULL
+```
+
+## EDA
+#### Correlation matrix of all variables
+```{r}
+corrData <- cor(existing2)
+corrplot(corrData)
+```
+
+#### Corrplot is unreadable with so many variables, but we examined the corrData, which revealed that x5StarReviews had a perfect correlation of 1 to our target variable, 'volume,' which risks overfitting. We will remove x5StarReviews, product types that are not PC, Laptop, Netbook, Smartphone, and other variables with less than .18 correlation to 'volume.'
+
+
+```{r}
+# remove x5Star, low correlated, and product types not of interest to client
+existing2 <- subset(existing2, select = -c(1:4, 8:9, 11:12, 15, 24:27))
+str(existing2)
+```
+
+
+```{r}
+# View correlation heatmap
+corrData <- cor(existing2)
+corrplot(corrData)
+```
+
+```{r}
+# view enhanced correlation heatmap with unnecessary variables removed
+corrplot(corrData, method = 'shade', shade.col = NA, tl.col = 'black', 
+         type = 'upper', tl.srt = 45)
+```
+
+#### As you can see, x4Star, x3Star, x2Star, and PositiveService Review have highest correlation to target variable 'Volume.'
+
+
+```{r, message=FALSE}
+ggplot(data = existing2, mapping = aes(x = Volume)) +
+  geom_histogram()
+```
+
+#### Histogram of Volume, reveals a couple outliers
+
+```{r}
+ggplot(data = existing, aes(x = ProductType, y = Volume, fill = ProductType)) +
+  geom_bar(stat = 'identity') + 
+  guides(fill=FALSE) +
+  coord_flip()
+```
+
+#### Observation
+* Notice Accessories by far has most volume sold. With such an imbalance in volume, we will need to use log to accurately to tell the impact of Star Reviews and Service Reviews on Sales Volume. We will first create a dataset that filters out only the products we are interested in: PCs, Netbooks, Laptops, Smartphones
+
+```{r}
+# data frame of only products of interest
+existing3 <- filter(existing, (ProductType=='PC' | ProductType=='Netbook' | ProductType=='Laptop' | ProductType=='Smartphone')) 
+```
+
+## Plot association of 4 Star Reviews on Sales Volume
+```{r, message=FALSE, warning=FALSE}
+ggplot(data=existing3, aes(x=x4StarReviews, y=Volume)) + 
+  geom_point(aes(color=ProductType, size=1)) +
+  theme_bw() +
+  scale_x_continuous(trans = 'log2') + 
+  scale_y_continuous(trans = 'log2') +
+  geom_line() +
+  facet_wrap(~ProductType) + 
+  xlab('Number of 4 Star Reviews') +
+  ylab('Sales Volume') +
+  ggtitle('Effect of 4 Star Reviews on Sales Volume')
+```
+
+## Plot association of 3 Star Reviews on Sales Volume
+```{r, message=FALSE, warning=FALSE}
+ggplot(data=existing3, aes(x=x3StarReviews, y=Volume)) + 
+  geom_point(aes(color=ProductType, size=1)) +
+  theme_bw() +
+  scale_x_continuous(trans = 'log2') + 
+  scale_y_continuous(trans = 'log2') +
+  geom_line() +
+  facet_wrap(~ProductType) + 
+  xlab('Number of 3 Star Reviews') +
+  ylab('Sales Volume') +
+  ggtitle('Effect of 3 Star Reviews on Sales Volume')
+```
+
+## Plot association of 2 Star Reviews on Sales Volume
+```{r, message=FALSE, warning=FALSE}
+ggplot(data=existing3, aes(x=x2StarReviews, y=Volume)) + 
+  geom_point(aes(color=ProductType, size=1)) +
+  theme_bw() +
+  scale_x_continuous(trans = 'log2') + 
+  scale_y_continuous(trans = 'log2') +
+  geom_line() +
+  facet_wrap(~ProductType) + 
+  xlab('Number of 2 Star Reviews') +
+  ylab('Sales Volume') +
+  ggtitle('Effect of 2 Star Reviews on Sales Volume')
+```
+
+## Plot association of 1 Star Reviews on Sales Volume
+```{r, message=FALSE, warning=FALSE}
+ggplot(data=existing3, aes(x=x1StarReviews, y=Volume)) + 
+  geom_point(aes(color=ProductType, size=1)) +
+  theme_bw() +
+  scale_x_continuous(trans = 'log2') + 
+  scale_y_continuous(trans = 'log2') +
+  geom_line() +
+  facet_wrap(~ProductType) + 
+  xlab('Number of 1 Star Reviews') +
+  ylab('Sales Volume') +
+  ggtitle('Effect of 1 Star Reviews on Sales Volume')
+```
+
+#### Observations
+* Interestingly, all Star reviews seem to have positive correlation to sales volume, perhaps this is due to the fact that higher volume of reviews is obvious indication of more products being sold.
+
+## Plot impact of Positive Service Reviews on Sales Volume
+```{r, message=FALSE, warning=FALSE}
+ggplot(data=existing3, aes(x=PositiveServiceReview, y=Volume)) + 
+  geom_point(aes(color=ProductType, size=1)) +
+  theme_bw() +
+  scale_x_continuous(trans = 'log2') + 
+  scale_y_continuous(trans = 'log2') +
+  geom_line() +
+  facet_wrap(~ProductType) + 
+  xlab('Number of Positive Service Reviews') +
+  ylab('Sales Volume') +
+  ggtitle('Effect of Positive Service Reviews on Sales Volume')
+```
+
+## Plot impact of Negative Service Reviews on Sales Volume
+```{r, message=FALSE, warning=FALSE}
+ggplot(data=existing3, aes(x=NegativeServiceReview, y=Volume)) + 
+  geom_point(aes(color=ProductType, size=1)) +
+  theme_bw() +
+  scale_x_continuous(trans = 'log2') + 
+  scale_y_continuous(trans = 'log2') +
+  geom_line() +
+  facet_wrap(~ProductType) + 
+  xlab('Number of Negative Service Reviews') +
+  ylab('Sales Volume') +
+  ggtitle('Effect of Negative Service Reviews on Sales Volume')
+```
+
+#### Observations
+* Positive service reviews are positively associated with sales volume.
+* Negative service reviews are not quite as linearly related to volume, however, there is a slight positive association. 
+* It is important to note that there are very few negative service reviews.
+
+
+## Modeling 
+
+```{r}
+set.seed(123)
+
+# CreateDataPartition() 75% and 25%
+index1 <- createDataPartition(existing2$Volume, p=0.75, list = FALSE)
+train1 <- existing2[ index1,]
+test1 <- existing2[-index1,]
+
+# Check structure of train1
+str(train1)
+
+# Set cross validation
+control1 <- trainControl(method = 'repeatedcv',
+                         number = 10,
+                         repeats = 1)
+```
+
+# Random forest model and tuning
+```{r}
+# set seed
+set.seed(123)
+
+# Creating dataframe for manual tuning
+rfGrid <- expand.grid(mtry = c(2,3,4,5,6,7,8))
+
+rf1 <- train(Volume ~ x4StarReviews + PositiveServiceReview + x2StarReviews + x3StarReviews + 
+               x1StarReviews + NegativeServiceReview + Recommendproduct + ShippingWeight + Price,
+             data = train1,
+             method = 'rf',
+             trControl = control1,
+             tuneGrid = rfGrid)
+
+rf1
+```
+
+## Level of importance for variables in model
+```{r}
+ggplot(varImp(rf1, scale=FALSE)) +
+  geom_bar(stat = 'identity') +
+  ggtitle('Variable Importance of Random Forest 1 on Sales Volume')
+```
+
+## Plot residuals
+```{r}
+rf1resid <- residuals(rf1)
+plot(train1$Volume, rf1resid, 
+     xlab = 'Sales Volume', 
+     ylab = 'Residuals', 
+     main ='Predicted Sales Volume Residuals Plot',
+     abline(0,0))
+```
+
+#### Observations
+* Overall the residual plot looks good, except there are two outliers that will likely skew our R2 and RMSE results, especially if they are not even for products of interest. 
+* A deeper dive reveals that both outliers are for accessories which are not of interest in this project. We will remove these two outliers from the test data set
+
+```{r}
+# Removing 2 outlier rows #18 and #48 from test set
+test1_rem_out <- test1[!rownames(test1) %in% c('18', '48'), ]
+```
+
+### Predict rf1 on test1
+```{r}
+rf1Preds <- predict(rf1, newdata = test1_rem_out)
+summary(rf1Preds)
+plot(rf1Preds)
+```
+
+#### Observation
+* A symmetrical pattern means a good residual plot
+
+```{r}
+# postResample to test if model will do well on new data
+PR_rf1 <- data.frame(postResample(rf1Preds, test1_rem_out$Volume))
+PR_rf1
+```
+
+#### CV RMSE=788, R2=.908
+#### PostResample RMSE=190, R2=.945
+
+#### Our Cross Validation R2 is .908 after tuning and feature selection, which is excellent. Our postResample R2 is even better, at .945. If cross validation was above 94-95%, it would be a red-flag for overfitting, but postResample in upper 90s means it will generalize well on new data (and thus is not overfitting).
+
+## Random Forest using feature selection
+```{r}
+set.seed(123)
+
+rf2 <- train(Volume ~ x4StarReviews + PositiveServiceReview + x2StarReviews,
+             data = train1,
+             method = 'rf',
+             trControl = control1)
+
+rf2
+```
+
+#### Variable importance
+```{r}
+ggplot(varImp(rf2, scale=FALSE)) +
+  geom_bar(stat = 'identity') +
+  ggtitle('Variable Importance of Random Forest 2 on Sales Volume')
+```
+
+### Plotting the residuals against the actual values for Volume. The graph below shows a couple volume outliers, and further research reveals both outliers are for accessories, which are not products of interest.
+```{r}
+resid_rf2 <- residuals(rf2)
+plot(train1$Volume, resid_rf2, 
+     xlab = 'Sales Volume', 
+     ylab = 'Residuals', 
+     main ='Predicted Sales Volume Residuals Plot',
+     abline(0,0))
+```
+
+#### Predict rf2 on test1 with outliers removed
+```{r}
+rf2Preds <- predict(rf2, newdata = test1_rem_out)
+summary(rf2Preds)
+plot(rf2Preds)
+```
+
+```{r}
+# postResample
+PR_rf2 <- data.frame(postResample(rf2Preds, test1_rem_out$Volume))
+PR_rf2
+```
+
+### CV RMSE = 745, R2=.928
+### PostResample RMSE=153, R2=.972
+### The postResample R2 and RMSE for a regression model is excellent.
+
+
+## Support Vector Machines -- RBF Kernel Feature Selection
+```{r}
+set.seed(123)
+
+# Creating dataframe for manual tuning
+rbfGrid <- expand.grid(sigma = c(.01, .015, .2),
+                       C = c(10, 100, 1000))
+
+rbf1 <- train(Volume ~ x4StarReviews + x3StarReviews + PositiveServiceReview,
+              data = train1,
+              method = 'svmRadial',
+              trControl = control1,
+              tuneGrid = rbfGrid,
+              preProc = c('center','scale'))
+
+rbf1
+```
+
+#### Predict rbf1 on test1
+```{r}
+rbf1Preds <- predict(rbf1, newdata = test1_rem_out)
+summary(rbf1Preds)
+plot(rbf1Preds)
+```
+
+#### postResample
+```{r}
+PR_rbf1 <- data.frame(postResample(rbf1Preds, test1_rem_out$Volume))
+PR_rbf1
+```
+
+### CV RMSE=879, R2=.919
+### PostResample RMSE=264, R2=.815
+
+# Support Vector Machines -- RBF Kernel 
+```{r, message=FALSE, warning=FALSE}
+set.seed(123)
+
+# Creating dataframe for manual tuning
+rbfGrid <- expand.grid(sigma = c(.01, .015, .2),
+                       C = c(10, 100, 1000))
+
+rbf2 <- train(Volume ~ .,
+              data = train1,
+              method = 'svmRadial',
+              trControl = control1,
+              tuneGrid = rbfGrid,
+              preProc = c('center','scale'))
+
+rbf2
+```
+
+#### Variable importance
+```{r}
+ggplot(varImp(rbf2, scale=FALSE)) +
+  geom_bar(stat = 'identity') +
+  ggtitle('Variable Importance of Support Vector RBF Model on Sales Volume')
+```
+
+### Predicting rbf2 on test1
+```{r}
+rbf2Preds <- predict(rbf2, newdata = test1_rem_out)
+summary(rbf2Preds)
+```
+
+```{r}
+# postResample to test if it will do well on new data or if overfitting
+PR_rbf2 <- data.frame(postResample(rbf2Preds, test1_rem_out$Volume))
+PR_rbf2
+```
+
+#### CV RMSE=657, R2=.909
+#### PostResample RMSE=420, R2=.704 
+#### Contains negative predictions
+
+
+
+## Gradient Boosting with feature selection
+```{r, message=FALSE, results='hide'}
+set.seed(123)
+
+gbm1 <- train(Volume ~ x4StarReviews + x2StarReviews + PositiveServiceReview,
+              data = train1,
+              method = 'gbm',
+              trControl = control1,
+              preProc = c('center','scale'))
+```
+
+```{r}
+gbm1
+```
+
+### Plotting the residuals against the actual values for Volume. The graph below shows a couple volume outliers, and further research reveals both outliers are for accessories, which are not products of interest.
+```{r}
+resid_gbm1 <- residuals(gbm1)
+plot(train1$Volume, resid_gbm1, 
+     xlab = 'Sales Volume', 
+     ylab = 'Residuals', 
+     main ='Predicted Sales Volume Residuals Plot',
+     abline(0,0))
+```
+
+### Predicting gbm on test1 with outliers removed
+```{r}
+gbmPreds <- predict(gbm1, newdata = test1_rem_out)
+summary(gbmPreds)
+```
+
+### postResample 
+```{r}
+PR_gbm1 <- data.frame(postResample(gbmPreds, test1_rem_out$Volume))
+PR_gbm1
+```
+
+#### CV RMSE=1010, R2=.858
+#### PostResample RMSE=266, R2=.911 
+
+# Gradient Boosting
+```{r, warning=FALSE, message = FALSE, results='hide'}
+set.seed(123)
+
+gbm2 <- train(Volume ~ .,
+              data = train1,
+              method = 'gbm',
+              trControl = control1,
+              preProc = c('center','scale'))
+gbm2
+```
+
+#### Plotting the residuals against the actual values for Volume. The graph below shows a couple volume outliers, and further research reveals both outliers are for accessories, which are not products of interest.
+```{r}
+resid_gbm2 <- residuals(gbm2)
+plot(train1$Volume, resid_gbm2, 
+     xlab = 'Sales Volume', 
+     ylab = 'Residuals', 
+     main ='Predicted Sales Volume Residuals Plot',
+     abline(0,0))
+```
+
+#### Predicting gbm2 on test1 with outliers removed
+```{r}
+gbm2Preds <- predict(gbm2, newdata = test1_rem_out)
+summary(gbm2Preds)
+```
+
+#### postResample
+```{r}
+PR_gbm2 <- data.frame(postResample(gbm2Preds, test1_rem_out$Volume))
+PR_gbm2
+```
+
+#### CV RMSE=813, R2=.962 
+#### PostResample RMSE=321, R2=.74
+#### Contains negative predictions
+
+## view actual vs predicted results in data frame for all models
+```{r}
+Act_v_Pred_NoOutlier <- data.frame(test1_rem_out %>% 
+                                     select(ProductNum, Volume),
+                                   rf1Preds, rf2Preds, rbf1Preds, rbf2Preds, gbmPreds, gbm2Preds) %>% 
+  mutate_if(is.numeric, round)
+```
+
+## Compare predictions to actual volume sold for each model
+```{r}
+kable(Act_v_Pred_NoOutlier, format = 'html', caption = 'Actual Sales Compared to Model Predictions', digits=3) %>% kable_styling(bootstrap_options = 'striped', full_width = FALSE) %>% 
+  column_spec(2, border_right = TRUE)
+```
+
+```{r, results='hide', include=FALSE}
+### export to excel
+write.xlsx(Act_v_Pred_NoOutlier, file = "Actual_vs_Predicted_NoOutlier.xlsx", row.names=TRUE)
+```
+
+```{r}
+# compare postResample metrics across all models
+PostResample_AllModels <- data.frame(cbind(PR_rf1, PR_rf2, PR_rbf1, PR_rbf2, PR_gbm1, PR_gbm2))
+
+kable(PostResample_AllModels, format = 'html', caption = 'PostResample Result Comparison for All Models',
+      col.names = c('RF1','RF2','SVM RBF1','SVM RBF2','GBoost1','GBoost2')) %>% 
+  kable_styling(bootstrap_options = 'striped', full_width = FALSE) %>% 
+  column_spec(3, background = '#8494a9', color = 'white') %>% 
+  column_spec(1, border_right = TRUE)
+```
+
+
+
+## Top Model: rf2
+#### Use top model to make predictions on new product dataset
+
+## Import data
+```{r}
+new <- read.csv(file.path('C:/Users/jlbro/OneDrive/C3T3', 'new.csv'), stringsAsFactors = TRUE)
+
+# check structure
+str(new)
+```
+
+## Process data same as training data set
+```{r}
+# create dummy variables
+newDummy <- dummyVars(' ~ .', data = new)
+
+new2 <- data.frame(predict(newDummy, newdata = new))
+
+# check structure
+str(new2)
+```
+
+```{r, results='hide'}
+new2$BestSellersRank <- NULL
+
+```
+```{r, results='hide'}
+new2 <- subset(new2, select = -c(1:4, 8:9, 11:12, 15, 24:27))
+
+str(new2)
+```
+
+#### Predict rf1 on 'new' product data
+```{r}
+set.seed(123)
+
+Predicted_Volume <- predict(rf2, newdata = new2)
+```
+
+#### Add predictions to the 'new' product dataframe
+```{r}
+Preds_rf2_df <- data.frame(new2 %>% select(ProductType.Laptop, ProductType.Netbook, ProductType.PC, ProductType.Smartphone, ProductNum, x4StarReviews), Predicted_Volume) %>% 
+  mutate_if(is.numeric, round)
+
+write.xlsx(Preds_rf2_df, 'C:/Users/jlbro/OneDrive/Predict Sales Volume//Rf1Preds.xlsx')
+
+Preds_rf2_df <- read.xlsx(file.path('C:/Users/jlbro/OneDrive/Predict Sales Volume', 'Rf1Predictions.xlsx'))
+```
+
+#### View our sales predictions for 4 product types on a new dataset. All products not of interest were removed.  
+```{r}
+kable(Preds_rf2_df, format = 'html', caption = 'Forecasted Sales for New Product Types',
+      col.names = c('Product Type', 'Product Number', '4 Star Reviews', 'Predicted Volume'), align = 'lccc') %>% 
+  kable_styling(bootstrap_options = 'striped', full_width = FALSE) %>% 
+  row_spec(1, background = '#8494a9', color = 'white') %>% 
+  row_spec(3, background = '#8494a9', color = 'white') %>% 
+  row_spec(7, background = '#8494a9', color = 'white') %>% 
+  row_spec(11, background = '#8494a9', color = 'white')
+```
+
+## Actionable Insights
+#### 1) The more Star Reviews a product has, the higher the sales volume. Consider focusing more on existing product types with more 4 and 5 Star reviews.
+#### 2) The more Positive Service Reviews, the higher the sales volume for most products. Because of this, consider boosting Customer Service training during employee on-boarding and regularly thereafter as part of a Customer- and Employee-centric Company mission. 
+#### 3) PC #171, Laptop #173, Netbook #180, and Smartphone #650 are projected to outperform other products within each type quite handily, with other products also worthy of bringing on board. Captialize on predicted sales volume to help determine new products for building store inventory.
+
+
+## Report analysis by Jennifer Brosnahan
