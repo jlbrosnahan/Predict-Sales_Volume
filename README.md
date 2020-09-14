@@ -31,4 +31,4 @@ Data consists of service reviews, customer reviews, historical sales data, and p
 * PC #171, Laptop #173, Netbook #180, and Smartphone #650 are projected to outperform other products within each type quite handily, with other products also worthy of bringing on board. Captialize on predicted sales volume to help determine new products for building store inventory.
 
 ## Sales predictions
-![Visual 1]()
+![Visual 1](https://github.com/jlbrosnahan/Predict-Sales_Volume/blob/master/Rplot02.jpeg)
